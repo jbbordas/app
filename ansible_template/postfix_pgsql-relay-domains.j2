@@ -1,0 +1,10 @@
+# postgres config
+hosts = localhost
+user = {{postgre_user}}
+password = {{postgre_pwd}}
+dbname = simplelogin
+
+query = SELECT domain FROM custom_domain WHERE domain='%s' AND verified=true
+    UNION SELECT '%s' WHERE '%s' = ' {{ my_domain_com }}' LIMIT 1;
+    
+

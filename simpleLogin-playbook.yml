@@ -1,0 +1,153 @@
+# ansible_path/nuage-playbook.yml
+- name: Installation des serveur web
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create Basic Directories
+      file: "path={{item}} state=directory mode=0775 owner=0 group=0"
+      with_items:
+        - /sl
+        - /sl/pgp # to store PGP key
+        - /sl/db # to store database
+        - /sl/upload # to store quarantine emails
+        - /sel/conf
+        
+    - name: Copy dkim.key  file with permissions
+      ansible.builtin.copy:
+        src: ansible_conf/dkim.key
+        dest: /sl/conf/dkim.key
+        mode: '0644'
+
+    - name: Copy dkim.pub.key  file with permissions
+      ansible.builtin.copy:
+        src: ansible_conf/dkim.pub.key
+        dest: /sl/conf/dkim.pub.key
+        mode: '0644'
+    
+    - name: Test if docker is installed
+      command: docker
+      register: result
+      ignore_errors: True
+      
+    - name: Debug beacause docker is notinstall
+      debug:
+        msg: "Docker not install, ending play"
+      when: result|failed
+    
+    - name: Ending the play if docker not install
+      meta: end_play
+      when: result|failed   
+    
+    - name: Create simple Login docker network
+      docker_network:
+        name: sl-network
+        ipam_options:
+          subnet: '240.0.0.0/24'
+          gateway: 240.0.0.1
+          
+          
+    - name: Init data
+      ansible.builtin.shell: |
+        docker run -d \
+        --name sl-db \
+        -e POSTGRES_PASSWORD={{postgre_pwd}} \
+        -e POSTGRES_USER={{postgre_user}} \
+        -e POSTGRES_DB=simplelogin \
+        -p 5432:5432 \
+        -v /sl/db:/var/lib/postgresql/data \
+        --restart always \
+        --network="sl-network" \
+        postgres:12.1
+          
+    - name: Install postfix  (state=present is optional)
+      apt:
+        name: postfix
+        state: present 
+    
+    - name: Install postfix-pgsql  (state=present is optional)
+      apt:
+        name: postfix-pgsql
+        state: present   
+        
+    - name: Write the postfix config file
+      ansible.builtin.template:
+        src: ansible_template/postfix_conf.j2
+        dest: /etc/postfix/main.cf
+        backup: yes
+      
+    - name: Write the pgsql-relay-domains.cf config file
+      ansible.builtin.template:
+        src: ansible_template/postfix_pgsql-relay-domains.j2
+        dest: /etc/postfix/pgsql-relay-domains.cf
+        backup: yes
+      
+    - name: Write the pgsql-transport-maps.cf config file
+      ansible.builtin.template:
+        src: ansible_template/postfix_pgsql-transport-maps.j2
+        dest:  /etc/postfix/pgsql-transport-maps.cf
+        backup: yes
+
+    - name: Restart service httpd, in all cases
+      ansible.builtin.service:
+        name: postfix
+        state: restarted
+        
+    - name: Write the pgsql-transport-maps.cf config file
+      ansible.builtin.template:
+        src: ansible_template/simplelogin_env.j2
+        dest:  ~/simplelogin.env
+        backup: yes
+        
+    - name: prepare the database by running the migration
+      ansible.builtin.shell: |
+        docker run --rm \
+        --name sl-migration \
+        -v /sl:/sl \
+        -v /sl/upload:/code/static/upload \
+        -v /dkim.key:/dkim.key \
+        -v /dkim.pub.key:/dkim.pub.key \
+        -v /simplelogin.env:/code/.env \
+        --network="sl-network" \
+        simplelogin/app:3.4.0 flask db upgrade
+        
+    - name: Init data
+      ansible.builtin.shell: |
+        docker run --rm \
+        --name sl-init \
+        -v /sl:/sl \
+        -v /simplelogin.env:/code/.env \
+        -v /dkim.key:/dkim.key \
+        -v /dkim.pub.key:/dkim.pub.key \
+        --network="sl-network" \
+        simplelogin/app:3.4.0 python init_app.py
+        
+        
+    - name:  run the webapp container!
+      ansible.builtin.shell: |
+        docker run -d \
+        --name sl-app \
+        -v /sl:/sl \
+        -v /sl/upload:/code/static/upload \
+        -v /simplelogin.env:/code/.env \
+        -v /dkim.key:/dkim.key \
+        -v /dkim.pub.key:/dkim.pub.key \
+        -p 7777:7777 \
+        --restart always \
+        --network="sl-network" \
+        simplelogin/app:3.4.0
+        
+    - name:  run the email handler
+      ansible.builtin.shell: |
+        docker run -d \
+        --name sl-email \
+        -v /sl:/sl \
+        -v /sl/upload:/code/static/upload \
+        -v /simplelogin.env:/code/.env \
+        -v /dkim.key:/dkim.key \
+        -v /dkim.pub.key:/dkim.pub.key \
+        -p 20381:20381 \
+        --restart always \
+        --network="sl-network" \
+        simplelogin/app:3.4.0 python email_handler.py
+
+...
