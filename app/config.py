@@ -265,12 +265,12 @@ PAGE_LIMIT = 20
 LOCAL_FILE_UPLOAD = "LOCAL_FILE_UPLOAD" in os.environ
 UPLOAD_DIR = None
 
-# Greylisting features
+# Rate Limiting
 # nb max of activity (forward/reply) an alias can have during 1 min
-MAX_ACTIVITY_DURING_MINUTE_PER_ALIAS = 5
+MAX_ACTIVITY_DURING_MINUTE_PER_ALIAS = 10
 
 # nb max of activity (forward/reply) a mailbox can have during 1 min
-MAX_ACTIVITY_DURING_MINUTE_PER_MAILBOX = 10
+MAX_ACTIVITY_DURING_MINUTE_PER_MAILBOX = 15
 
 if LOCAL_FILE_UPLOAD:
     print("Upload files to local dir")
@@ -384,6 +384,8 @@ except Exception:
 ALIAS_LIMIT = os.environ.get("ALIAS_LIMIT") or "100/day;50/hour;5/minute"
 
 ENABLE_SPAM_ASSASSIN = "ENABLE_SPAM_ASSASSIN" in os.environ
+
+ALIAS_RANDOM_SUFFIX_LENGTH = int(os.environ.get("ALIAS_RAND_SUFFIX_LENGTH", 5))
 
 try:
     HIBP_SCAN_INTERVAL_DAYS = int(os.environ.get("HIBP_SCAN_INTERVAL_DAYS"))
